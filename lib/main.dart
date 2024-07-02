@@ -1,640 +1,235 @@
+//----------------PARTIE Joystick----------------
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart';
+import 'package:flutter_joystick/flutter_joystick.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/status.dart' as status;
+import 'dart:convert';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  final cameras = await availableCameras();
-  final firstCamera = cameras.first;
-  runApp(MyApp(camera: firstCamera));
+void main() {
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  final CameraDescription camera;
-
-  const MyApp({Key? key, required this.camera}) : super(key: key);
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ControlCar',
       debugShowCheckedModeBanner: false,
-      home: HomeScreen(camera: camera),
+      home: MyHomePage(),
     );
   }
 }
 
-class HomeScreen extends StatefulWidget {
-  final CameraDescription camera;
-
-  const HomeScreen({Key? key, required this.camera}) : super(key: key);
-
+class MyHomePage extends StatefulWidget {
   @override
-  _HomeScreenState createState() => _HomeScreenState();
+  _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  int _selectedIndex = 0;
-
-  late final List<Widget> _widgetOptions;
+class _MyHomePageState extends State<MyHomePage> {
+  late final WebSocketChannel channel;
 
   @override
   void initState() {
     super.initState();
-    _widgetOptions = <Widget>[
-      ManualControlScreen(camera: widget.camera),
-      const AutonomousControlScreen(),
-      const SensorInfoScreen(),
-    ];
+    channel = WebSocketChannel.connect(
+      Uri.parse('ws://192.168.233.11/ws'),
+    );
+    print('WebSocket connected');
   }
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+  @override
+  void dispose() {
+    channel.sink.close(status.goingAway);
+    super.dispose();
+  }
+
+  void _sendCommand(String command) {
+    print('Sending command: $command');
+    channel.sink.add(command);
+  }
+
+  void _onJoystickChange(StickDragDetails details) {
+    // Utiliser les propriétés x et y de StickDragDetails
+    double x = details.x;
+    double y = details.y;
+    int leftSpeed, rightSpeed;
+
+    // Calculer la vitesse des moteurs gauche et droit en fonction de x et y
+    leftSpeed = (y * 1000 + x * 500).toInt();
+    rightSpeed = (y * 1000 - x * 500).toInt();
+
+    final command = {
+      'cmd': 1,
+      'data': [leftSpeed, leftSpeed, rightSpeed, rightSpeed]
+    };
+    _sendCommand(jsonEncode(command));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.blue,
-        title: const Center(
-          child: Text('Contrôler la voiture'),
-        ),
+        title: Text('ControlCar'),
       ),
       body: Center(
-        child: _widgetOptions.elementAt(_selectedIndex),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-            icon: Icon(Icons.drive_eta),
-            label: 'Manuel',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.auto_mode),
-            label: 'Autonome',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.sensors),
-            label: 'Capteurs',
-          ),
-        ],
-        currentIndex: _selectedIndex,
-        selectedItemColor: Colors.blue,
-        onTap: _onItemTapped,
+        child: Joystick(
+          mode: JoystickMode.all,
+          listener: _onJoystickChange,
+        ),
       ),
     );
   }
 }
 
-class ManualControlScreen extends StatefulWidget {
-  final CameraDescription camera;
+//----------------------PARTIE BOUTON----------------------------------------------------
 
-  const ManualControlScreen({Key? key, required this.camera}) : super(key: key);
-
-  @override
-  _ManualControlScreenState createState() => _ManualControlScreenState();
-}
-
-class _ManualControlScreenState extends State<ManualControlScreen> {
-  late CameraController _controller;
-  late Future<void> _initializeControllerFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = CameraController(
-      widget.camera,
-      ResolutionPreset.medium,
-    );
-
-    _initializeControllerFuture = _controller.initialize();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      children: <Widget>[
-        Positioned(
-          top: 50,
-          child: FutureBuilder<void>(
-            future: _initializeControllerFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.done) {
-                return SizedBox(
-                  width: 300,
-                  height: 200,
-                  child: CameraPreview(_controller),
-                );
-              } else {
-                return const Center(child: CircularProgressIndicator());
-              }
-            },
-          ),
-        ),
-        Positioned(
-          top: 300,
-          child: ElevatedButton(
-            onPressed: () {
-              // Logique de commande manuelle pour avancer
-            },
-            child: const Text('Avancer'),
-          ),
-        ),
-        Positioned(
-          left: 100,
-          top: 400,
-          child: ElevatedButton(
-            onPressed: () {
-              // Logique de commande manuelle pour tourner à gauche
-            },
-            child: const Text('Gauche'),
-          ),
-        ),
-        Positioned(
-          right: 100,
-          top: 400,
-          child: ElevatedButton(
-            onPressed: () {
-              // Logique de commande manuelle pour tourner à droite
-            },
-            child: const Text('Droite'),
-          ),
-        ),
-        Positioned(
-          bottom: 100,
-          child: ElevatedButton(
-            onPressed: () {
-              // Logique de commande manuelle pour reculer
-            },
-            child: const Text('Reculer'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class AutonomousControlScreen extends StatelessWidget {
-  const AutonomousControlScreen({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        const Text(
-          'Mode de conduite autonome',
-          style: TextStyle(fontSize: 24),
-        ),
-        const SizedBox(height: 20),
-        ElevatedButton(
-          onPressed: () {
-            // Logique de démarrage du mode autonome
-          },
-          child: const Text('Démarrer le trajet prédéfini'),
-        ),
-        const SizedBox(height: 10),
-        ElevatedButton(
-          onPressed: () {
-            // Logique d'arrêt du mode autonome
-          },
-          child: const Text('Arrêter'),
-        ),
-      ],
-    );
-  }
-}
-
-class SensorInfoScreen extends StatelessWidget {
-  const SensorInfoScreen({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return const Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        Text(
-          'Informations des capteurs',
-          style: TextStyle(fontSize: 24),
-        ),
-        SizedBox(height: 20),
-        // Ajoutez ici les affichages des données des capteurs
-        Text(
-          'Capteur 1: ""',
-          style: TextStyle(fontSize: 18),
-        ),
-        SizedBox(height: 10),
-        Text(
-          'Capteur 2: ""',
-          style: TextStyle(fontSize: 18),
-        ),
-        SizedBox(height: 10),
-        // Ajoutez d'autres capteurs si nécessaire
-      ],
-    );
-  }
-}
-
-
-
-//----------------
 // import 'package:flutter/material.dart';
+// import 'package:web_socket_channel/web_socket_channel.dart';
+// import 'package:web_socket_channel/status.dart' as status;
+// import 'dart:convert';
 
 // void main() {
-//   runApp(const MyApp());
+//   runApp(MyApp());
 // }
 
 // class MyApp extends StatelessWidget {
-//   const MyApp({super.key});
-
 //   @override
 //   Widget build(BuildContext context) {
-//     return const MaterialApp(
+//     return MaterialApp(
 //       title: 'ControlCar',
 //       debugShowCheckedModeBanner: false,
-//       home: HomeScreen(),
+//       home: MyHomePage(),
 //     );
 //   }
 // }
 
-// class HomeScreen extends StatefulWidget {
-//   const HomeScreen({super.key});
-
+// class MyHomePage extends StatefulWidget {
 //   @override
-//   // ignore: library_private_types_in_public_api
-//   _HomeScreenState createState() => _HomeScreenState();
+//   _MyHomePageState createState() => _MyHomePageState();
 // }
 
-// class _HomeScreenState extends State<HomeScreen> {
-//   int _selectedIndex = 0;
+// class _MyHomePageState extends State<MyHomePage> {
+//   late final WebSocketChannel channel;
 
-//   static const List<Widget> _widgetOptions = <Widget>[
-//     ManualControlScreen(),
-//     AutonomousControlScreen(),
-//     SensorInfoScreen(),
-//   ];
+//   @override
+//   void initState() {
+//     super.initState();
+//     channel = WebSocketChannel.connect(
+//       Uri.parse('ws://192.168.233.11/ws'),
+//     );
+//     print('WebSocket connected');
+//   }
 
-//   void _onItemTapped(int index) {
-//     setState(() {
-//       _selectedIndex = index;
-//     });
+//   @override
+//   void dispose() {
+//     channel.sink.close(status.goingAway);
+//     super.dispose();
+//   }
+
+//   void _sendCommand(String command) {
+//     print('Sending command: $command');
+//     channel.sink.add(command);
 //   }
 
 //   @override
 //   Widget build(BuildContext context) {
 //     return Scaffold(
 //       appBar: AppBar(
-//         backgroundColor: Colors.blue,
-//         title: const Center(
-//           child: Text('Contrôler la voiture'),
-//         ),
+//         title: Text('ControlCar'),
 //       ),
-//       body: Center(
-//         child: _widgetOptions.elementAt(_selectedIndex),
-//       ),
-//       bottomNavigationBar: BottomNavigationBar(
-//         items: const <BottomNavigationBarItem>[
-//           BottomNavigationBarItem(
-//             icon: Icon(Icons.drive_eta),
-//             label: 'Manuel',
-//           ),
-//           BottomNavigationBarItem(
-//             icon: Icon(Icons.auto_mode),
-//             label: 'Autonome',
-//           ),
-//           BottomNavigationBarItem(
-//             icon: Icon(Icons.sensors),
-//             label: 'Capteurs',
-//           ),
-//         ],
-//         currentIndex: _selectedIndex,
-//         selectedItemColor: Colors.blue,
-//         onTap: _onItemTapped,
-//       ),
-//     );
-//   }
-// }
-
-// class ManualControlScreen extends StatelessWidget {
-//   const ManualControlScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Stack(
-//       alignment: Alignment.center,
-//       children: <Widget>[
-//         Positioned(
-//           top: 300,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour avancer
-//             },
-//             child: const Text('Avancer'),
-//           ),
-//         ),
-//         Positioned(
-//           left: 100,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour tourner à gauche
-//             },
-//             child: const Text('Gauche'),
-//           ),
-//         ),
-//         Positioned(
-//           right: 100,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour tourner à droite
-//             },
-//             child: const Text('Droite'),
-//           ),
-//         ),
-//         Positioned(
-//           bottom: 300,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour reculer
-//             },
-//             child: const Text('Reculer'),
-//           ),
-//         ),
-//       ],
-//     );
-//   }
-// }
-
-// class AutonomousControlScreen extends StatelessWidget {
-//   const AutonomousControlScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Column(
-//       mainAxisAlignment: MainAxisAlignment.center,
-//       children: <Widget>[
-//         const Text(
-//           'Mode de conduite autonome',
-//           style: TextStyle(fontSize: 24),
-//         ),
-//         const SizedBox(height: 20),
-//         ElevatedButton(
-//           onPressed: () {
-//             // Logique de démarrage du mode autonome
-//           },
-//           child: const Text('Démarrer le trajet prédéfini'),
-//         ),
-//         const SizedBox(height: 10),
-//         ElevatedButton(
-//           onPressed: () {
-//             // Logique d'arrêt du mode autonome
-//           },
-//           child: const Text('Arrêter'),
-//         ),
-//       ],
-//     );
-//   }
-// }
-
-// class SensorInfoScreen extends StatelessWidget {
-//   const SensorInfoScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return const Column(
-//       mainAxisAlignment: MainAxisAlignment.center,
-//       children: <Widget>[
-//         Text(
-//           'Informations des capteurs',
-//           style: TextStyle(fontSize: 24),
-//         ),
-//         SizedBox(height: 20),
-//         // Ajoutez ici les affichages des données des capteurs
-//         Text(
-//           'Capteur 1: ""',
-//           style: TextStyle(fontSize: 18),
-//         ),
-//         SizedBox(height: 10),
-//         Text(
-//           'Capteur 2: ""',
-//           style: TextStyle(fontSize: 18),
-//         ),
-//         SizedBox(height: 10),
-//         // Ajoutez d'autres capteurs si nécessaire
-//       ],
-//     );
-//   }
-// }
-//----------------------------------
-
-// import 'package:flutter/material.dart';
-
-// void main() {
-//   runApp(const MyApp());
-// }
-
-// class MyApp extends StatelessWidget {
-//   const MyApp({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return const MaterialApp(
-//       title: 'ControlCar',
-//       debugShowCheckedModeBanner: false,
-//       home: HomeScreen(),
-//     );
-//   }
-// }
-
-// class HomeScreen extends StatefulWidget {
-//   const HomeScreen({super.key});
-
-//   @override
-//   // ignore: library_private_types_in_public_api
-//   _HomeScreenState createState() => _HomeScreenState();
-// }
-
-// class _HomeScreenState extends State<HomeScreen> {
-//   int _selectedIndex = 0;
-
-//   static const List<Widget> _widgetOptions = <Widget>[
-//     ManualControlScreen(),
-//     AutonomousControlScreen(),
-//     SensorInfoScreen(),
-//   ];
-
-//   void _onItemTapped(int index) {
-//     setState(() {
-//       _selectedIndex = index;
-//     });
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         backgroundColor: Colors.blue,
-//         title: const Center(
-//           child: Text('Contrôler la voiture'),
-//         ),
-//       ),
-//       body: Center(
-//         child: _widgetOptions.elementAt(_selectedIndex),
-//       ),
-//       bottomNavigationBar: BottomNavigationBar(
-//         items: const <BottomNavigationBarItem>[
-//           BottomNavigationBarItem(
-//             icon: Icon(Icons.drive_eta),
-//             label: 'Manuel',
-//           ),
-//           BottomNavigationBarItem(
-//             icon: Icon(Icons.auto_mode),
-//             label: 'Autonome',
-//           ),
-//           BottomNavigationBarItem(
-//             icon: Icon(Icons.sensors),
-//             label: 'Capteurs',
-//           ),
-//         ],
-//         currentIndex: _selectedIndex,
-//         selectedItemColor: Colors.blue,
-//         onTap: _onItemTapped,
-//       ),
-//     );
-//   }
-// }
-
-// class ManualControlScreen extends StatelessWidget {
-//   const ManualControlScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Stack(
-//       alignment: Alignment.center,
-//       children: <Widget>[
-//         Positioned(
-//           top: 50,
-//           child: Container(
-//             width: 300,
-//             height: 200,
-//             color: Colors.black, // Placeholder for camera feed
-//             child: const Center(
-//               child: Text(
-//                 'Caméra',
-//                 style: TextStyle(color: Colors.white, fontSize: 20),
-//               ),
+//       body: Stack(
+//         alignment: Alignment.center,
+//         children: <Widget>[
+//           // ... Autres widgets
+//           Positioned(
+//             bottom: 100,
+//             child: Row(
+//               mainAxisAlignment: MainAxisAlignment.center,
+//               children: [
+//                 ElevatedButton(
+//                   onPressed: () {
+//                     final reculerCommand = {
+//                       'cmd': 1,
+//                       'data': [
+//                         -1000,
+//                         -1000,
+//                         -1000,
+//                         -1000
+//                       ], // Commande pour reculer avec une vitesse diminuée
+//                     };
+//                     _sendCommand(jsonEncode(reculerCommand));
+//                   },
+//                   child: const Text('Reculer'),
+//                 ),
+//                 SizedBox(width: 20), // Espacement entre les boutons
+//                 ElevatedButton(
+//                   onPressed: () {
+//                     final avancerCommand = {
+//                       'cmd': 1,
+//                       'data': [
+//                         1000,
+//                         1000,
+//                         1000,
+//                         1000
+//                       ], // Commande pour avancer avec une vitesse
+//                     };
+//                     _sendCommand(jsonEncode(avancerCommand));
+//                   },
+//                   child: const Text('Avancer'),
+//                 ),
+//                 SizedBox(width: 20), // Espacement entre les boutons
+//                 ElevatedButton(
+//                   onPressed: () {
+//                     final gaucheCommand = {
+//                       'cmd': 1,
+//                       'data': [
+//                         -500,
+//                         -500,
+//                         1000,
+//                         1000
+//                       ], // Commande pour tourner à gauche
+//                     };
+//                     _sendCommand(jsonEncode(gaucheCommand));
+//                   },
+//                   child: const Text('Gauche'),
+//                 ),
+//                 SizedBox(width: 20), // Espacement entre les boutons
+//                 ElevatedButton(
+//                   onPressed: () {
+//                     final droiteCommand = {
+//                       'cmd': 1,
+//                       'data': [
+//                         1000,
+//                         1000,
+//                         -500,
+//                         -500
+//                       ], // Commande pour tourner à droite
+//                     };
+//                     _sendCommand(jsonEncode(droiteCommand));
+//                   },
+//                   child: const Text('Droite'),
+//                 ),
+//                 SizedBox(width: 20), // Espacement entre les boutons
+//                 ElevatedButton(
+//                   onPressed: () {
+//                     final freinCommand = {
+//                       'cmd': 1,
+//                       'data': [
+//                         0,
+//                         0,
+//                         0,
+//                         0
+//                       ], // Commande pour arrêter tous les moteurs
+//                     };
+//                     _sendCommand(jsonEncode(freinCommand));
+//                   },
+//                   child: const Text('Frein'),
+//                 ),
+//               ],
 //             ),
 //           ),
-//         ),
-//         Positioned(
-//           top: 300,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour avancer
-//             },
-//             child: const Text('Avancer'),
-//           ),
-//         ),
-//         Positioned(
-//           left: 100,
-//           top: 400,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour tourner à gauche
-//             },
-//             child: const Text('Gauche'),
-//           ),
-//         ),
-//         Positioned(
-//           right: 100,
-//           top: 400,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour tourner à droite
-//             },
-//             child: const Text('Droite'),
-//           ),
-//         ),
-//         Positioned(
-//           bottom: 100,
-//           child: ElevatedButton(
-//             onPressed: () {
-//               // Logique de commande manuelle pour reculer
-//             },
-//             child: const Text('Reculer'),
-//           ),
-//         ),
-//       ],
+//         ],
+//       ),
 //     );
 //   }
 // }
-
-// class AutonomousControlScreen extends StatelessWidget {
-//   const AutonomousControlScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Column(
-//       mainAxisAlignment: MainAxisAlignment.center,
-//       children: <Widget>[
-//         const Text(
-//           'Mode de conduite autonome',
-//           style: TextStyle(fontSize: 24),
-//         ),
-//         const SizedBox(height: 20),
-//         ElevatedButton(
-//           onPressed: () {
-//             // Logique de démarrage du mode autonome
-//           },
-//           child: const Text('Démarrer le trajet prédéfini'),
-//         ),
-//         const SizedBox(height: 10),
-//         ElevatedButton(
-//           onPressed: () {
-//             // Logique d'arrêt du mode autonome
-//           },
-//           child: const Text('Arrêter'),
-//         ),
-//       ],
-//     );
-//   }
-// }
-
-// class SensorInfoScreen extends StatelessWidget {
-//   const SensorInfoScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return const Column(
-//       mainAxisAlignment: MainAxisAlignment.center,
-//       children: <Widget>[
-//         Text(
-//           'Informations des capteurs',
-//           style: TextStyle(fontSize: 24),
-//         ),
-//         SizedBox(height: 20),
-//         // Ajoutez ici les affichages des données des capteurs
-//         Text(
-//           'Capteur 1: ""',
-//           style: TextStyle(fontSize: 18),
-//         ),
-//         SizedBox(height: 10),
-//         Text(
-//           'Capteur 2: ""',
-//           style: TextStyle(fontSize: 18),
-//         ),
-//         SizedBox(height: 10),
-//         // Ajoutez d'autres capteurs si nécessaire
-//       ],
-//     );
-//   }
-// }
-
